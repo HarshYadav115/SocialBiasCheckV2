@@ -14,17 +14,18 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Bias Detection API")
 
-# Configure CORS
+# Configure CORS for production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # Update this with your Vercel domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load bias keywords
-with open(os.path.join(os.path.dirname(__file__), '../data/bias_keywords.json')) as f:
+# Load bias keywords with absolute path for Vercel
+KEYWORDS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bias_keywords.json')
+with open(KEYWORDS_PATH) as f:
     BIAS_KEYWORDS = json.load(f)
 
 class TextInput(BaseModel):
