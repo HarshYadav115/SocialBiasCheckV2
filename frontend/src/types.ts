@@ -13,4 +13,5 @@ export interface BiasAnalysis {
   bias_scores: BiasScores;
   overall_bias: string;
   confidence: number;
+  detected_phrases: { [key: string]: string[] };
 }

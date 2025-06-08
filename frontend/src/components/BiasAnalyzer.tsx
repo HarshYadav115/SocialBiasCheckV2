@@ -50,11 +50,17 @@ const BiasAnalyzer: React.FC<Props> = ({ onAnalysisComplete, result }) => {
     setError(null);
 
     try {
+      console.log('Sending request to analyze:', { text });
       const response = await axios.post<BiasAnalysis>('http://localhost:8000/analyze', { text });
+      console.log('Received response:', response.data);
       onAnalysisComplete(response.data);
-    } catch (err) {
-      setError('Failed to analyze text. Please try again.');
-      console.error('Analysis error:', err);
+    } catch (error: any) {
+      console.error('Analysis error details:', error);
+      if (error.response?.data?.detail) {
+        setError(`Failed to analyze text: ${error.response.data.detail}`);
+      } else {
+        setError(`Failed to analyze text: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setLoading(false);
     }

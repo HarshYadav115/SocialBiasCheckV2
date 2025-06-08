@@ -213,22 +213,32 @@ def determine_overall_bias(scores: Dict[str, float]) -> tuple[str, float]:
 
 @app.post("/analyze", response_model=BiasAnalysis)
 async def analyze_text(input_data: TextInput):
+    logger.info(f"Received analysis request for text: {input_data.text[:100]}...")
+    
     if not input_data.text.strip():
+        logger.warning("Received empty text for analysis")
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     
-    # Calculate bias scores and get detected phrases
-    bias_scores, detected_phrases = calculate_bias_scores(input_data.text)
-    
-    # Determine overall bias and confidence
-    overall_bias, confidence = determine_overall_bias(bias_scores)
-    
-    return BiasAnalysis(
-        text=input_data.text,
-        bias_scores=bias_scores,
-        overall_bias=overall_bias,
-        confidence=confidence,
-        detected_phrases=detected_phrases
-    )
+    try:
+        # Calculate bias scores and get detected phrases
+        bias_scores, detected_phrases = calculate_bias_scores(input_data.text)
+        
+        # Determine overall bias and confidence
+        overall_bias, confidence = determine_overall_bias(bias_scores)
+        
+        result = BiasAnalysis(
+            text=input_data.text,
+            bias_scores=bias_scores,
+            overall_bias=overall_bias,
+            confidence=confidence,
+            detected_phrases=detected_phrases
+        )
+        logger.info(f"Analysis complete. Overall bias: {overall_bias}, Confidence: {confidence:.2f}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error during analysis: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/categories")
 async def get_categories():
