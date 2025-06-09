@@ -14,12 +14,28 @@ import {
   Collapse,
   Chip,
 } from '@mui/material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip as RechartsTooltip, 
+  ResponsiveContainer, 
+  Cell,
+  TooltipProps
+} from 'recharts';
 import InfoIcon from '@mui/icons-material/Info';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import { BiasAnalysis } from '../types';
+
+interface ChartData {
+  category: string;
+  score: number;
+  fill: string;
+}
 
 interface Props {
   onAnalysisComplete: (result: BiasAnalysis) => void;
@@ -96,6 +112,31 @@ const BiasAnalyzer: React.FC<Props> = ({ onAnalysisComplete, result }) => {
       'mixed': 'Contains elements from multiple political perspectives',
     };
     return descriptions[bias as keyof typeof descriptions] || '';
+  };
+
+  const CustomTooltip: React.FC<TooltipProps<number, string>> = (props) => {
+    const { active, payload } = props;
+    if (active && payload && payload.length) {
+      const data = payload[0].payload as ChartData;
+      return (
+        <Box
+          sx={{
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            p: 1.5,
+            borderRadius: 1,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+          }}
+        >
+          <Typography variant="body2" sx={{ mb: 0.5 }}>
+            <strong>{data.category}</strong>
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Score: {(data.score * 100).toFixed(1)}%
+          </Typography>
+        </Box>
+      );
+    }
+    return null;
   };
 
   return (
@@ -320,35 +361,8 @@ const BiasAnalyzer: React.FC<Props> = ({ onAnalysisComplete, result }) => {
                     tick={{ fill: theme.palette.text.secondary }}
                     axisLine={{ stroke: theme.palette.divider }}
                   />
-                  <RechartsTooltip
-                    content={({ active, payload }: { active: boolean | undefined, payload: any[] | undefined }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <Box
-                            sx={{
-                              backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                              p: 1.5,
-                              borderRadius: 1,
-                              boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ mb: 0.5 }}>
-                              <strong>{data.category}</strong>
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Score: {(data.score * 100).toFixed(1)}%
-                            </Typography>
-                          </Box>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar
-                    dataKey="score"
-                    radius={[4, 4, 0, 0]}
-                  >
+                  <RechartsTooltip content={CustomTooltip} />
+                  <Bar dataKey="score" radius={[4, 4, 0, 0]}>
                     {getChartData(result.bias_scores).map((entry, index) => (
                       <Cell 
                         key={`cell-${index}`} 
