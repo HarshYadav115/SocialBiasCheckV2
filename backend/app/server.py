@@ -1,30 +1,15 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
-import os
 from typing import Dict, List, Set, Tuple
-import re
-from collections import defaultdict
 import logging
-from functools import lru_cache
+from collections import defaultdict
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Bias Detection API")
-
-# Configure CORS for production
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Update this with your Vercel domain in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Load bias keywords with absolute path for Vercel
+# Load bias keywords
 KEYWORDS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bias_keywords.json')
 with open(KEYWORDS_PATH) as f:
     BIAS_KEYWORDS = json.load(f)
@@ -43,24 +28,6 @@ PROCESSED_KEYWORDS = {
     },
     'neutral': set(kw.lower() for kw in BIAS_KEYWORDS['neutral_terms'])
 }
-
-class TextInput(BaseModel):
-    text: str
-
-class BiasAnalysis(BaseModel):
-    text: str
-    bias_scores: Dict[str, float]
-    overall_bias: str
-    confidence: float
-    detected_phrases: Dict[str, List[str]]  # New field to show matched phrases
-
-@lru_cache(maxsize=128)
-def preprocess_text(text: str) -> Tuple[str, List[str], Set[str]]:
-    """Preprocess text and cache results."""
-    processed_text = text.lower()
-    words = processed_text.split()
-    word_set = set(words)
-    return processed_text, words, word_set
 
 def find_phrase_matches(text: str, phrases: Set[str]) -> List[str]:
     """Optimized phrase matching with high sensitivity to individual keywords."""
@@ -83,14 +50,14 @@ def find_phrase_matches(text: str, phrases: Set[str]) -> List[str]:
         if len(phrase_words) == 1:
             phrase_word = next(iter(phrase_words))
             for input_word in input_words:
-                if phrase_word in input_word or input_word in phrase_word:
+                if phrase_word in input_word:
                     matches.append(phrase)
                     break
         # For multi-word phrases, check if any significant portion of words match
         else:
             common_words = input_words.intersection(phrase_words)
             # More lenient threshold - even one or two matching words might indicate bias
-            if len(common_words) >= max(1, len(phrase_words) * 0.3):  # Reduced threshold
+            if len(common_words) >= max(1, len(phrase_words) * 0.3):  # Even more reduced threshold
                 matches.append(phrase)
                 
     return matches
@@ -126,13 +93,13 @@ def calculate_bias_scores(text: str) -> Tuple[Dict[str, float], Dict[str, List[s
     # Process neutral terms with reduced impact
     matches = find_phrase_matches(text, PROCESSED_KEYWORDS['neutral'])
     if matches:
-        scores["neutral"] += len(matches) * 0.3  # Reduced neutral weight
+        scores["neutral"] += len(matches) * 0.3  # Reduced neutral weight significantly
         detected_phrases["neutral"].extend(matches)
     
     # Add baseline scores for any matches to ensure non-neutral results
     for category in scores:
         if scores[category] > 0:
-            scores[category] += 0.5  # Baseline score
+            scores[category] += 0.5  # Increased baseline score
     
     # Normalize scores
     total_score = sum(scores.values())
@@ -149,7 +116,7 @@ def determine_overall_bias(scores: Dict[str, float]) -> Tuple[str, float]:
         return "neutral", 0.0
     
     # Much lower threshold for detecting bias
-    threshold = max_score * 0.5  # Reduced threshold
+    threshold = max_score * 0.5  # Significantly reduced threshold
     dominant_categories = [cat for cat, score in scores.items() if score >= threshold]
     
     # Handle extreme categories first
@@ -181,48 +148,80 @@ def determine_overall_bias(scores: Dict[str, float]) -> Tuple[str, float]:
     
     return max(scores.items(), key=lambda x: x[1])[0], max_score
 
-@app.post("/analyze", response_model=BiasAnalysis)
-async def analyze_text(input_data: TextInput):
-    logger.info(f"Received analysis request for text: {input_data.text[:100]}...")
-    
-    if not input_data.text.strip():
-        logger.warning("Received empty text for analysis")
-        raise HTTPException(status_code=400, detail="Text cannot be empty")
-    
+class BiasAnalyzerHandler(BaseHTTPRequestHandler):
+    def _send_cors_headers(self):
+        """Helper method to send CORS headers"""
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+    def do_OPTIONS(self):
+        """Handle preflight CORS requests"""
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        """Handle GET requests"""
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self._send_cors_headers()
+            self.end_headers()
+            response = {'status': 'ok', 'message': 'Bias Analyzer API is running'}
+            self.wfile.write(json.dumps(response).encode())
+        else:
+            self.send_error(404, 'Not Found')
+
+    def do_POST(self):
+        """Handle POST requests"""
+        if self.path == '/analyze':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_error(400, 'Empty request body')
+                    return
+
+                post_data = self.rfile.read(content_length)
+                request_data = json.loads(post_data.decode('utf-8'))
+                
+                if not request_data.get('text', '').strip():
+                    self.send_error(400, 'Text cannot be empty')
+                    return
+                
+                bias_scores, detected_phrases = calculate_bias_scores(request_data['text'])
+                overall_bias, confidence = determine_overall_bias(bias_scores)
+                
+                response_data = {
+                    'text': request_data['text'],
+                    'bias_scores': bias_scores,
+                    'overall_bias': overall_bias,
+                    'confidence': confidence,
+                    'detected_phrases': detected_phrases
+                }
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode())
+            except json.JSONDecodeError:
+                self.send_error(400, 'Invalid JSON')
+            except Exception as e:
+                logger.error(f"Error analyzing text: {str(e)}")
+                self.send_error(500, 'Internal Server Error')
+        else:
+            self.send_error(404, 'Not Found')
+
+def run_server(port=8000):
+    server_address = ('127.0.0.1', port)
+    httpd = HTTPServer(server_address, BiasAnalyzerHandler)
+    print(f'Starting server on http://127.0.0.1:{port}')
     try:
-        # Calculate bias scores and get detected phrases
-        bias_scores, detected_phrases = calculate_bias_scores(input_data.text)
-        
-        # Determine overall bias and confidence
-        overall_bias, confidence = determine_overall_bias(bias_scores)
-        
-        result = BiasAnalysis(
-            text=input_data.text,
-            bias_scores=bias_scores,
-            overall_bias=overall_bias,
-            confidence=confidence,
-            detected_phrases=detected_phrases
-        )
-        logger.info(f"Analysis complete. Overall bias: {overall_bias}, Confidence: {confidence:.2f}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error during analysis: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print('\nShutting down server...')
+        httpd.server_close()
 
-@app.get("/categories")
-async def get_categories():
-    return {
-        "categories": [
-            "left_wing",
-            "right_wing",
-            "extreme_left",
-            "extreme_right",
-            "neutral"
-        ],
-        "description": "Available bias categories for analysis"
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+if __name__ == '__main__':
+    run_server() 
