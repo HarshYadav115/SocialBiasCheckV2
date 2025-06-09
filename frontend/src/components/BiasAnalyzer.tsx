@@ -28,8 +28,8 @@ import {
 import InfoIcon from '@mui/icons-material/Info';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import axios from 'axios';
 import { BiasAnalysis } from '../types';
+import api from '../config/api';
 
 interface ChartData {
   category: string;
@@ -67,7 +67,7 @@ const BiasAnalyzer: React.FC<Props> = ({ onAnalysisComplete, result }) => {
 
     try {
       console.log('Sending request to analyze:', { text });
-      const response = await axios.post<BiasAnalysis>('http://localhost:8000/analyze', { text });
+      const response = await api.post<BiasAnalysis>('/analyze', { text });
       console.log('Received response:', response.data);
       onAnalysisComplete(response.data);
     } catch (error: any) {
@@ -75,7 +75,7 @@ const BiasAnalyzer: React.FC<Props> = ({ onAnalysisComplete, result }) => {
       if (error.response?.data?.detail) {
         setError(`Failed to analyze text: ${error.response.data.detail}`);
       } else {
-        setError(`Failed to analyze text: ${error.message || 'Unknown error'}`);
+        setError(error.message || 'Failed to analyze text. Please try again.');
       }
     } finally {
       setLoading(false);
